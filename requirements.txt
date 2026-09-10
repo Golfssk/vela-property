@@ -3,3 +3,7 @@ supabase
 pandas
 folium
 streamlit-folium
+line-bot-sdk
+flask
+google-generativeai
+gunicorn
