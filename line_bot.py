@@ -9,7 +9,6 @@ import json
 
 app = Flask(__name__)
 
-# ดึงค่าจาก Environment Variables เพื่อความปลอดภัย
 LINE_CHANNEL_SECRET = os.getenv('LINE_CHANNEL_SECRET')
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
@@ -23,6 +22,16 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+
+# พิกัดกลางของโซนต่างๆ ในเขาใหญ่
+ZONE_COORDS = {
+    "หมูสี": (14.5381, 101.4017),
+    "หนองน้ำแดง": (14.6500, 101.4167),
+    "พญาเย็น": (14.6333, 101.2167),
+    "ปากช่อง": (14.7081, 101.4161),
+    "ขนงพระ": (14.6100, 101.4500),
+    "default": (14.5500, 101.4000) # พิกัดกลางเขาใหญ่
+}
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -39,16 +48,16 @@ def handle_message(event):
     user_text = event.message.text
     
     prompt = f"""
-    ช่วยสกัดข้อมูลอสังหาริมทรัพย์จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น โดยไม่มี markdown หรือข้อความอื่น:
+    ช่วยสกัดข้อมูลอสังหาริมทรัพย์จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น โดยไม่มี markdown:
     ข้อความ: "{user_text}"
     
     รูปแบบ JSON ที่ต้องการ:
     {{
-        "price": ตัวเลขราคาขายรวม (บาท) เป็น integer เช่น 5000000 (ถ้าไม่พบให้ใส่ null),
-        "size_sq_wah": ขนาดพื้นที่เป็นตารางวา เช่น 800 (ถ้าหน่วยเป็นไร่-งาน-วา ให้แปลงเป็นตารางวา เช่น 2 ไร่ = 800 ตร.ว.),
-        "contact_name": "ชื่อผู้ติดต่อหรือนายหน้า (ถ้าไม่ระบุให้ใส่ null)",
-        "contact_number": "เบอร์โทรศัพท์ติดต่อ",
-        "property_url": "ลิงก์รูปหรือลิงก์ประกาศ (ถ้ามี)"
+        "price": ตัวเลขราคาขายรวม (บาท) เป็น integer เช่น 6000000 (ถ้าไม่พบใส่ null),
+        "size_sq_wah": ขนาดพื้นที่เป็นตารางวา เช่น 800 (ถ้าเป็นไร่ให้แปลงเป็นตารางวา เช่น 2 ไร่ = 800 ตร.ว.),
+        "location_zone": "ชื่อตำบลหรือโซน เช่น หมูสี, หนองน้ำแดง, พญาเย็น (ถ้าไม่ระบุใส่ null)",
+        "contact_name": "ชื่อผู้ติดต่อหรือนายหน้า",
+        "contact_number": "เบอร์โทรศัพท์"
     }}
     """
     
@@ -60,6 +69,10 @@ def handle_message(event):
         
         price = data.get('price')
         size = data.get('size_sq_wah')
+        zone = data.get('location_zone', 'default')
+        
+        # ดึงพิกัดตามโซน
+        lat, lng = ZONE_COORDS.get(zone, ZONE_COORDS['default']) if zone in ZONE_COORDS else ZONE_COORDS['default']
         
         if price and size:
             price_per_sq_wah = price / size
@@ -70,23 +83,23 @@ def handle_message(event):
                 "size_sq_wah": size,
                 "contact_name": data.get('contact_name', '-'),
                 "contact_number": data.get('contact_number', '-'),
-                "property_url": data.get('property_url', '-'),
+                "latitude": lat,
+                "longitude": lng,
                 "status": status
             }
             
             supabase.table("vela_khaoyai_properties").insert(insert_data).execute()
             
-            reply_msg = f"✅ บันทึกข้อมูลเข้าระบบเรียบร้อยแล้วครับ!\n\n" \
+            reply_msg = f"✅ บันทึกข้อมูลและปักหมุดเรียบร้อย!\n\n" \
+                        f"📍 โซน: {zone if zone else 'เขาใหญ่'}\n" \
                         f"💰 ราคา: {price:,.0f} บาท\n" \
-                        f"📐 ขนาด: {size} ตร.ว. ({price_per_sq_wah:,.0f} บาท/ตร.ว.)\n" \
-                        f"👤 ผู้ติดต่อ: {data.get('contact_name', '-')}\n" \
-                        f"📞 เบอร์โทร: {data.get('contact_number', '-')}\n" \
+                        f"📐 ขนาด: {size} ตร.ว. ({price_per_sq_wah:,.0f} บ./ตร.ว.)\n" \
                         f"📊 ผลประเมิน AI: {status}"
         else:
-            reply_msg = "⚠️ ไม่สามารถอ่านข้อมูลราคาหรือขนาดพื้นที่ได้ชัดเจน กรุณาระบุรายละเอียดเพิ่มเติมครับ"
+            reply_msg = "⚠️ อ่านราคาหรือขนาดพื้นที่ไม่ชัดเจน กรุณาระบุ เช่น 'ขายที่หมูสี 2 ไร่ 6 ล้าน'"
             
     except Exception as e:
-        reply_msg = f"❌ เกิดข้อผิดพลาดในการประมวลผล: {str(e)}"
+        reply_msg = f"❌ เกิดข้อผิดพลาด: {str(e)}"
 
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
 
