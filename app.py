@@ -59,7 +59,6 @@ st.markdown("""
   --ink:#1a1712;
 }
 #MainMenu, footer {visibility:hidden;}
-
 .stApp{
   background:var(--stone-100);
 }
@@ -80,7 +79,6 @@ section[data-testid="stSidebar"] *{
 section[data-testid="stSidebar"] .stRadio label{
   font-size:1.02rem;
 }
-
 .stButton>button, .stFormSubmitButton>button{
   background:var(--brass);
   color:var(--forest-950);
@@ -93,7 +91,6 @@ section[data-testid="stSidebar"] .stRadio label{
   background:var(--brass-light);
   color:var(--forest-950);
 }
-
 div[data-testid="stMetric"]{
   background:var(--forest-950);
   border:1px solid rgba(242,237,224,0.14);
@@ -103,7 +100,6 @@ div[data-testid="stMetric"]{
 div[data-testid="stMetric"] label, div[data-testid="stMetricValue"]{
   color:var(--stone-100) !important;
 }
-
 .hero-banner{
   position:relative;
   min-height:340px;
@@ -120,19 +116,16 @@ div[data-testid="stMetric"] label, div[data-testid="stMetricValue"]{
 .hero-eyebrow{color:var(--brass-light); font-family:'Taviraj',serif; font-style:italic; margin-bottom:10px;}
 .hero-title{color:var(--stone-100); font-family:'Taviraj',serif; font-size:2.6rem; line-height:1.15; margin:0;}
 .hero-sub{color:var(--stone-200); max-width:560px; margin-top:14px; font-size:1.02rem;}
-
 .section-title{
   font-family:'Taviraj', serif; font-size:1.5rem; color:var(--forest-950);
   margin:26px 0 14px 0; border-bottom:1px solid var(--stone-300); padding-bottom:10px;
 }
-
 .zone-card{
   background:#fff; border:1px solid var(--stone-300); padding:22px; border-radius:2px; height:100%;
 }
 .zone-card .tag{color:var(--clay); font-family:'Taviraj',serif; font-style:italic; font-size:0.85rem; margin-bottom:8px;}
 .zone-card h4{font-family:'Taviraj',serif; margin:0 0 8px 0; color:var(--forest-900); font-size:1.2rem;}
 .zone-card p{font-size:0.9rem; color:#5b5340; margin:0;}
-
 .listing-card{
   background:var(--forest-950); border:1px solid rgba(242,237,224,0.12); border-radius:2px;
   padding:20px; margin-bottom:14px;
@@ -144,13 +137,11 @@ div[data-testid="stMetric"] label, div[data-testid="stMetricValue"]{
 .listing-card h4{color:var(--stone-100); font-family:'Sarabun',sans-serif; font-weight:600; margin:0 0 6px 0; font-size:1.05rem;}
 .listing-card .price{color:var(--brass-light); font-family:'Taviraj',serif; font-size:1.3rem; margin:6px 0;}
 .listing-card .meta{color:var(--stone-300); font-size:0.85rem;}
-
 .lead-card{
   background:#fff; border-left:4px solid var(--brass); padding:16px 20px; margin-bottom:10px; border-radius:2px;
 }
 .lead-card h5{margin:0 0 4px 0; font-family:'Sarabun',sans-serif; font-weight:600; color:var(--forest-900);}
 .lead-card .lead-meta{font-size:0.85rem; color:#6b6250;}
-
 .empty-box{
   border:1px dashed var(--stone-300); padding:28px; text-align:center; color:#6b6250; border-radius:2px;
 }
