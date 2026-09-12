@@ -26,6 +26,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
+# ตัวแปรจำสถานะการทำงานของ User แต่ละคน (ทำให้ไม่ต้องพิมพ์คำนำหน้าซ้ำ)
+USER_STATES = {}
+
 @app.route("/")
 def home():
     return "Vela Property LINE Bot is running actively!"
@@ -51,17 +54,52 @@ def parse_gemini_json(response_text):
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_text = event.message.text.strip()
+    user_id = event.source.user_id
     model = genai.GenerativeModel('gemini-3.6-flash')
+    
+    # เช็กว่า User คนนี้ค้างสถานะอะไรอยู่ไหม
+    current_state = USER_STATES.get(user_id)
 
-    # ---------------- โมดูล 1: บันทึกตลาด ----------------
+    # ---------------- ดักจับคำสั่งจากปุ่ม Rich Menu ----------------
     if user_text == "[MENU] บันทึกตลาด":
-        msg = "📍 **โหมดบันทึกตลาด**\n\nกรุณาพิมพ์คำว่า **บันทึกตลาด** ตามด้วยโพสต์ประกาศขายหรือพิกัดได้เลยครับ"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+        USER_STATES[user_id] = "MARKET_SCOUT"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📍 **โหมดบันทึกตลาด**\n\nวางข้อความหรือลิงก์โพสต์ขายได้เลยครับ (ไม่ต้องพิมพ์ 'บันทึกตลาด' แล้ว)"))
+        return
 
-    elif user_text.startswith("บันทึกตลาด"):
+    elif user_text == "[MENU] เพิ่มลูกค้า":
+        USER_STATES[user_id] = "CRM"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="👥 **โหมดเพิ่มลูกค้า / CRM**\n\nวางรายละเอียดความต้องการและงบประมาณได้เลยครับ"))
+        return
+
+    elif user_text == "[MENU] สร้างโพสต์ขาย":
+        USER_STATES[user_id] = "CONTENT"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✍️ **โหมดสร้างโพสต์ขาย**\n\nวางข้อมูลทรัพย์ที่ต้องการให้เขียนแคปชันได้เลยครับ"))
+        return
+
+    elif user_text == "[MENU] คำนวณค่าโอน":
+        USER_STATES[user_id] = "TAX"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🧮 **โหมดคำนวณค่าโอน**\n\nพิมพ์ตัวเลขราคาขาย, ราคาประเมิน และปีที่ถือครองได้เลยครับ"))
+        return
+
+    elif user_text == "[MENU] ประเมินราคา":
+        USER_STATES[user_id] = "VALUATION"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📊 **โหมดประเมินราคา**\n\nวางข้อมูลทรัพย์ที่ต้องการให้ประเมินเทียบกับตลาดได้เลยครับ"))
+        return
+
+    elif user_text in ("ยกเลิก", "[MENU] ยกเลิก"):
+        if user_id in USER_STATES: del USER_STATES[user_id]
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🔄 ยกเลิกรายการเรียบร้อย กลับสู่โหมดปกติครับ"))
+        return
+
+    # ---------------- โมดูล 1: บันทึกตลาด (ทำงานเมื่ออยู่ใน State หรือพิมพ์คำนำหน้า) ----------------
+    if current_state == "MARKET_SCOUT" or user_text.startswith("บันทึกตลาด"):
+        if user_id in USER_STATES: del USER_STATES[user_id] # เคลียร์สถานะ
+        clean_text = user_text.replace("บันทึกตลาด", "").strip()
+        
+        # บังคับให้ AI ต้องเดาพิกัดจากสถานที่
         prompt = f"""
         สกัดข้อมูลอสังหาริมทรัพย์พื้นที่ปากช่องจากข้อความนี้ ให้อยู่ในรูปแบบ JSON เท่านั้น:
-        "{user_text}"
+        "{clean_text}"
         
         รูปแบบ:
         {{
@@ -70,8 +108,8 @@ def handle_message(event):
             "price": ตัวเลขราคาขายรวมเป็นบาท (ถ้าไม่มีใส่ null),
             "size_sq_wah": ตัวเลขขนาดพื้นที่รวมเป็นตารางวา (ถ้าไม่มีใส่ null),
             "source_url": "URL ที่พบ (ถ้าไม่มีใส่ null)",
-            "latitude": ตัวเลขพิกัดละติจูด (วิเคราะห์จากจุดสังเกต หรือ null),
-            "longitude": ตัวเลขพิกัดลองจิจูด (วิเคราะห์จากจุดสังเกต หรือ null)
+            "latitude": ตัวเลขพิกัดละติจูด (บังคับ! หากไม่มีตัวเลขพิกัด ให้ประเมินจากจุดสังเกตในข้อความ เช่น 'ธายาม่า', 'คลองม่วง', 'ซีเจ' แล้วใส่ละติจูดของบริเวณนั้น ห้ามใส่ null ถ้ามีเบาะแส),
+            "longitude": ตัวเลขพิกัดลองจิจูด (บังคับประเมินจากสถานที่เช่นเดียวกับ latitude)
         }}
         """
         try:
@@ -97,23 +135,27 @@ def handle_message(event):
             }
             supabase.table("pakchong_market_scout").insert(insert_data).execute()
             
+            lat_lng_msg = f"{lat}, {lng} (AI ประเมินทำเล)" if lat else "ไม่ระบุ"
+            
             reply_msg = (f"✅ บันทึกตลาดสำเร็จ!\n📌 {insert_data['property_type']} | ต.{insert_data['location_zone']}\n"
                          f"💰 ราคา: {f'{price:,.0f}' if price else 'ไม่ระบุ'} บาท\n"
-                         f"🗺️ พิกัด: {lat}, {lng}" if lat else "🗺️ พิกัด: ไม่ระบุ")
+                         f"🗺️ พิกัด: {lat_lng_msg}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         except Exception as e:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ Error: {str(e)}"))
 
     # ---------------- โมดูล 2: CRM & Matching ----------------
-    elif user_text == "[MENU] เพิ่มลูกค้า":
-        msg = "👥 **โหมดเพิ่มลูกค้า / CRM**\n\nกรุณาพิมพ์คำว่า **เพิ่มลูกค้า**, **เพิ่มผู้ขาย** หรือ **เพิ่มนายหน้า** ตามด้วยรายละเอียดและงบประมาณครับ"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
-
-    elif user_text.startswith(("เพิ่มลูกค้า", "เพิ่มผู้ขาย", "เพิ่มนายหน้า")):
-        contact_type = "ผู้ซื้อ" if user_text.startswith("เพิ่มลูกค้า") else "ผู้ขาย" if user_text.startswith("เพิ่มผู้ขาย") else "นายหน้า"
+    elif current_state == "CRM" or user_text.startswith(("เพิ่มลูกค้า", "เพิ่มผู้ขาย", "เพิ่มนายหน้า")):
+        if user_id in USER_STATES: del USER_STATES[user_id]
+        clean_text = user_text
+        for w in ["เพิ่มลูกค้า", "เพิ่มผู้ขาย", "เพิ่มนายหน้า"]: clean_text = clean_text.replace(w, "").strip()
+        
+        contact_type = "ผู้ซื้อ" if "ผู้ซื้อ" in user_text or "ลูกค้า" in user_text else "ผู้ขาย" if "ผู้ขาย" in user_text else "นายหน้า"
+        if current_state == "CRM" and contact_type not in ["ผู้ขาย", "นายหน้า"]: contact_type = "ผู้ซื้อ" # Default
+        
         prompt = f"""
         สกัดข้อมูล Lead จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น:
-        "{user_text}"
+        "{clean_text}"
         
         รูปแบบ:
         {{
@@ -149,19 +191,14 @@ def handle_message(event):
                     reply_msg += "\n🔥 พบทรัพย์ที่อาจตรงสเปก:\n"
                     for i, m in enumerate(matches, 1):
                         reply_msg += f"{i}. {m['property_type']} ต.{m['location_zone']} - {m['price']:,.0f} บ.\n"
-                else:
-                    reply_msg += "\n*ยังไม่พบทรัพย์ในตลาดที่ตรงสเปกและอยู่ในงบ*"
 
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_msg))
         except Exception as e:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ Error CRM: {str(e)}"))
 
     # ---------------- โมดูล 3: สร้างโพสต์ขาย ----------------
-    elif user_text == "[MENU] สร้างโพสต์ขาย":
-        msg = "✍️ **โหมดสร้างโพสต์ขาย**\n\nกรุณาพิมพ์คำว่า **โพสต์** ตามด้วยรายละเอียดทรัพย์ หรือ รหัสทรัพย์ เช่น:\nโพสต์ ที่ดินหมูสี 2 ไร่ 5 ล้าน วิวเขา มีน้ำไฟพร้อม เน้นกลุ่มคนกรุงเทพ"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
-
-    elif user_text.startswith("โพสต์"):
+    elif current_state == "CONTENT" or user_text.startswith("โพสต์"):
+        if user_id in USER_STATES: del USER_STATES[user_id]
         clean_text = user_text.replace("โพสต์", "").strip()
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ AI กำลังเรียบเรียงแคปชันและดึงจุดขาย กรุณารอสักครู่..."))
         prompt = f"""
@@ -181,63 +218,54 @@ def handle_message(event):
 
     # ---------------- โมดูล 4: เมนูกฎหมายและสัญญา ----------------
     elif user_text == "[MENU] สัญญา":
-        quick_reply_buttons = QuickReply(
-            items=[
-                QuickReplyButton(action=MessageAction(label="🆕 สร้างสัญญา", text="[CONTRACT] สร้าง")),
-                QuickReplyButton(action=MessageAction(label="🔍 ตรวจสอบสัญญา", text="[CONTRACT] ตรวจสอบ")),
-                QuickReplyButton(action=MessageAction(label="✏️ แก้ไขสัญญา", text="[CONTRACT] แก้ไข")),
-                QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"))
-            ]
-        )
+        quick_reply_buttons = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="🆕 สร้างสัญญา", text="[CONTRACT] สร้าง")),
+            QuickReplyButton(action=MessageAction(label="🔍 ตรวจสอบสัญญา", text="[CONTRACT] ตรวจสอบ")),
+            QuickReplyButton(action=MessageAction(label="✏️ แก้ไขสัญญา", text="[CONTRACT] แก้ไข")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"))
+        ])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📑 **เมนูกฎหมายและสัญญาอสังหาฯ**\nกรุณาเลือกรายการที่ต้องการทำครับ:", quick_reply=quick_reply_buttons))
 
     elif user_text == "[CONTRACT] สร้าง":
-        quick_reply_types = QuickReply(
-            items=[
-                QuickReplyButton(action=MessageAction(label="นายหน้าเปิด (Open)", text="[CREATE_PDF] นายหน้าเปิด")),
-                QuickReplyButton(action=MessageAction(label="นายหน้าปิด (Exclusive)", text="[CREATE_PDF] นายหน้าปิด")),
-                QuickReplyButton(action=MessageAction(label="สัญญาจะซื้อจะขาย", text="[CREATE_PDF] สัญญาจะซื้อจะขาย")),
-                QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"))
-            ]
-        )
+        quick_reply_types = QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="นายหน้าเปิด (Open)", text="[CREATE_PDF] นายหน้าเปิด")),
+            QuickReplyButton(action=MessageAction(label="นายหน้าปิด (Exclusive)", text="[CREATE_PDF] นายหน้าปิด")),
+            QuickReplyButton(action=MessageAction(label="สัญญาจะซื้อจะขาย", text="[CREATE_PDF] สัญญาจะซื้อจะขาย")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"))
+        ])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 **เลือกประเภทสัญญาที่ต้องการสร้าง:**", quick_reply=quick_reply_types))
 
     elif user_text.startswith("[CREATE_PDF]"):
         contract_type = user_text.replace("[CREATE_PDF]", "").strip()
-        msg = f"📄 **พร้อมสร้าง: {contract_type}**\n\nกรุณาพิมพ์คำว่า **ร่างสัญญา** ตามด้วยข้อมูล เช่น:\nร่างสัญญา ผู้ซื้อคุณเอ ผู้ขายคุณบี ที่ดินหมูสี 2 ไร่ ราคา 5 ล้าน มัดจำ 1 แสน"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+        USER_STATES[user_id] = f"PDF_{contract_type}"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"📄 **พร้อมสร้าง: {contract_type}**\n\nวางข้อมูลดีล เช่น ผู้ซื้อ ผู้ขาย ราคา มัดจำ ได้เลยครับ"))
 
     elif user_text == "[CONTRACT] ตรวจสอบ":
-        msg = "🔍 **โหมดตรวจสอบสัญญา**\n\nกรุณาพิมพ์คำว่า **ตรวจสัญญา** ตามด้วยข้อความสัญญาที่ต้องการให้ AI เช็กความเสี่ยงทางกฎหมายครับ"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+        USER_STATES[user_id] = "CONTRACT_CHECK"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🔍 **โหมดตรวจสอบสัญญา**\n\nวางข้อความสัญญาที่ต้องการให้ AI เช็กความเสี่ยงได้เลยครับ"))
 
     elif user_text == "[CONTRACT] แก้ไข":
-        msg = "✏️ **โหมดแก้ไขสัญญา**\n\nกรุณาพิมพ์คำว่า **แก้ไขสัญญา** ตามด้วยจุดที่ต้องการปรับแก้ครับ"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+        USER_STATES[user_id] = "CONTRACT_EDIT"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✏️ **โหมดแก้ไขสัญญา**\n\nวางจุดที่ต้องการปรับแก้ได้เลยครับ"))
 
-    elif user_text.startswith(("ร่างสัญญา", "ตรวจสัญญา", "แก้ไขสัญญา")):
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ ได้รับข้อมูล {user_text.split(' ')[0]} แล้ว ระบบ AI PDF กำลังอยู่ระหว่างเชื่อมต่อครับ..."))
+    elif current_state and current_state.startswith("PDF_"):
+        if user_id in USER_STATES: del USER_STATES[user_id]
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ ได้รับข้อมูลแล้ว ระบบ AI PDF กำลังอยู่ระหว่างเชื่อมต่อครับ..."))
+        
+    elif current_state in ("CONTRACT_CHECK", "CONTRACT_EDIT"):
+        if user_id in USER_STATES: del USER_STATES[user_id]
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ กำลังตรวจสอบและประมวลผลทางกฎหมาย..."))
 
     # ---------------- โมดูล 5: คำนวณค่าโอน ----------------
-    elif user_text == "[MENU] คำนวณค่าโอน":
-        msg = "🧮 **โหมดคำนวณค่าโอนกรมที่ดิน**\n\nกรุณาพิมพ์คำว่า **ค่าโอน** ตามด้วยตัวเลข เช่น:\nค่าโอน ราคาขาย 5 ล้าน ประเมิน 4 ล้าน ถือครองมา 3 ปี บุคคลธรรมดา"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
-
-    elif user_text.startswith("ค่าโอน"):
+    elif current_state == "TAX" or user_text.startswith("ค่าโอน"):
+        if user_id in USER_STATES: del USER_STATES[user_id]
         clean_text = user_text.replace("ค่าโอน", "").strip()
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ AI กำลังคำนวณภาษีและค่าธรรมเนียม กรุณารอสักครู่..."))
         prompt = f"""
-        คุณคือเจ้าหน้าที่ประเมินอสังหาริมทรัพย์และผู้เชี่ยวชาญกรมที่ดิน
-        จงคำนวณค่าใช้จ่ายวันโอนกรรมสิทธิ์เบื้องต้นจากข้อมูลนี้: "{clean_text}"
-        
-        เงื่อนไขพื้นฐาน (อ้างอิงกฎหมายไทย):
-        - ค่าธรรมเนียมการโอน 2% ของราคาประเมิน
-        - ภาษีธุรกิจเฉพาะ 3.3% ของราคาขายหรือประเมิน (ที่สูงกว่า) กรณีถือครองไม่เกิน 5 ปี หรือไม่มีชื่อในทะเบียนบ้านเกิน 1 ปี
-        - อากรแสตมป์ 0.5% ของราคาขายหรือประเมิน (ที่สูงกว่า) กรณีไม่เสียภาษีธุรกิจเฉพาะ
-        - ภาษีเงินได้หัก ณ ที่จ่าย (ประเมินคร่าวๆ ตามขั้นบันได)
-        
-        ให้สรุปผลลัพธ์เป็น Bullet Point ที่อ่านง่าย แยกรายการค่าใช้จ่ายชัดเจน และสรุปยอดรวมคร่าวๆ
-        หมายเหตุตอนท้าย: "ตัวเลขนี้เป็นการประมาณการ ควรตรวจสอบกับสำนักงานที่ดินอีกครั้ง"
+        คุณคือเจ้าหน้าที่ประเมินอสังหาริมทรัพย์
+        จงคำนวณค่าใช้จ่ายวันโอนกรรมสิทธิ์จากข้อมูลนี้: "{clean_text}"
+        เงื่อนไข: ค่าโอน 2%, ภาษีธุรกิจเฉพาะ 3.3% หรือ อากรแสตมป์ 0.5%, ภาษีเงินได้หัก ณ ที่จ่าย
+        สรุปเป็น Bullet Point อ่านง่าย
         """
         try:
             response = model.generate_content(prompt)
@@ -246,25 +274,14 @@ def handle_message(event):
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Tax: {str(e)}"))
 
     # ---------------- โมดูล 6: ประเมินราคา ----------------
-    elif user_text == "[MENU] ประเมินราคา":
-        msg = "📊 **โหมดประเมินราคา (Valuation)**\n\nพิมพ์คำว่า **ประเมิน** ตามด้วยทรัพย์ที่ต้องการเช็กราคา เช่น:\nประเมิน ที่ดินหมูสี 2 ไร่ ราคา 5 ล้านบาท"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
-
-    elif user_text.startswith("ประเมิน"):
+    elif current_state == "VALUATION" or user_text.startswith("ประเมิน"):
+        if user_id in USER_STATES: del USER_STATES[user_id]
         clean_text = user_text.replace("ประเมิน", "").strip()
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ AI กำลังสืบค้นราคาตลาดและวิเคราะห์ความคุ้มค่า..."))
         
         prompt_extract = f"""
-        สกัดข้อมูลเพื่อประเมินราคา จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น:
-        "{clean_text}"
-        
-        รูปแบบ:
-        {{
-            "property_type": "ประเภททรัพย์ (เช่น ที่ดิน, บ้าน) ถ้าไม่มีใส่ 'ไม่ระบุ'",
-            "location_zone": "ทำเลที่ตั้ง (เช่น หมูสี, ปากช่อง) ถ้าไม่มีใส่ 'ไม่ระบุ'",
-            "price": ตัวเลขราคาขายรวมเป็นบาท (ถ้าไม่มีใส่ 0),
-            "size_sq_wah": ตัวเลขขนาดพื้นที่รวมเป็นตารางวา (ถ้าไม่มีใส่ 0)
-        }}
+        สกัดข้อมูลเพื่อประเมินราคา จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น: "{clean_text}"
+        รูปแบบ: {{"property_type": "ประเภท", "location_zone": "ทำเล", "price": 0, "size_sq_wah": 0}}
         """
         try:
             ext_response = model.generate_content(prompt_extract)
@@ -274,45 +291,24 @@ def handle_message(event):
             target_zone = data.get('location_zone', 'ไม่ระบุ')
             target_price = data.get('price', 0)
             target_size = data.get('size_sq_wah', 0)
-            
             target_price_per_sqw = target_price / target_size if target_size and target_size > 0 else 0
             
             res = supabase.table("pakchong_market_scout").select("price, size_sq_wah, price_per_sq_wah").eq("property_type", target_type).ilike("location_zone", f"%{target_zone}%").execute()
             comparables = [c for c in res.data if c.get('price_per_sq_wah')]
             
-            if comparables and len(comparables) > 0:
-                avg_price_per_sqw = sum([c['price_per_sq_wah'] for c in comparables]) / len(comparables)
-                min_price_per_sqw = min([c['price_per_sq_wah'] for c in comparables])
-                max_price_per_sqw = max([c['price_per_sq_wah'] for c in comparables])
-                count = len(comparables)
-                
-                analysis_prompt = f"""
-                คุณคือนักประเมินราคามืออาชีพ จงสรุปความคุ้มค่าของทรัพย์นี้
-                เป้าหมาย: {target_type} ต.{target_zone} ขนาด {target_size} ตร.ว. ราคา {target_price:,.0f} บาท (ตก {target_price_per_sqw:,.0f} บ./ตร.ว.)
-                ข้อมูลตลาด ({count} แปลงในระบบ): ราคาเฉลี่ย {avg_price_per_sqw:,.0f} บ./ตร.ว. (ต่ำสุด {min_price_per_sqw:,.0f} - สูงสุด {max_price_per_sqw:,.0f})
-                
-                สิ่งที่ต้องการ:
-                1. ทรัพย์เป้าหมายถูกหรือแพงกว่าตลาดกี่ %
-                2. เป็น Good Deal หรือไม่ ควรต่อรองราคาเหลือเท่าไร
-                """
-                analysis = model.generate_content(analysis_prompt).text.strip()
-                reply_msg = f"📊 **ผลประเมินราคา:** {target_type} ต.{target_zone}\n🔎 เทียบกับฐานข้อมูล {count} แปลงในพื้นที่\n\n{analysis}"
+            if comparables:
+                avg_price = sum([c['price_per_sq_wah'] for c in comparables]) / len(comparables)
+                analysis = model.generate_content(f"สรุปความคุ้มค่า: {target_type} ต.{target_zone} ราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว. เทียบกับตลาดเฉลี่ย {avg_price:,.0f} บ./ตร.ว. เป็น Good Deal ไหม?").text.strip()
+                reply_msg = f"📊 **ผลประเมินราคา:** {target_type} ต.{target_zone}\n🔎 เทียบกับฐานข้อมูล {len(comparables)} แปลงในพื้นที่\n\n{analysis}"
             else:
-                reply_msg = f"📉 **ผลประเมินราคา:** {target_type} ต.{target_zone}\nราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว.\n⚠️ ยังไม่มีข้อมูลเปรียบเทียบในระบบสำหรับพื้นที่นี้ครับ"
+                reply_msg = f"📉 **ผลประเมินราคา:** {target_type} ต.{target_zone}\nราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว.\n⚠️ ยังไม่มีข้อมูลเปรียบเทียบในระบบครับ"
                 
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=reply_msg))
-            
         except Exception as e:
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Valuation: {str(e)}"))
 
-    elif user_text in ("ยกเลิก", "[MENU] ยกเลิก"):
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🔄 ยกเลิกรายการเรียบร้อยครับ กลับสู่โหมดปกติ"))
-
     else:
-        line_bot_api.reply_message(
-            event.reply_token, 
-            TextSendMessage(text="💡 กรุณากดเลือกเมนูจาก Rich Menu ด้านล่างได้เลยครับ")
-        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 กรุณากดเลือกเมนูจาก Rich Menu ด้านล่างได้เลยครับ"))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
