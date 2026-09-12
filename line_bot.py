@@ -52,12 +52,13 @@ def handle_message(event):
         "location_zone": "ชื่อตำบลในปากช่อง (ปากช่อง, หมูสี, กลางดง, จันทึก, วังกะทะ, หนองน้ำแดง, หนองสาหร่าย, ขนงพระ, โป่งตาลอง, คลองม่วง, วังไทร, พญาเย็น) ถ้าไม่มีใส่ 'ไม่ระบุ'",
         "price": ตัวเลขราคาขายรวมเป็นบาท (ถ้าไม่มีใส่ null),
         "size_sq_wah": ตัวเลขขนาดพื้นที่รวมเป็นตารางวา (เช่น 2 ไร่ = 800) (ถ้าไม่มีใส่ null),
-        "source_url": "URL ที่พบในข้อความ (ถ้าไม่มีใส่ null)"
+        "source_url": "URL ที่พบในข้อความ (ถ้าไม่มีใส่ null)",
+        "latitude": ตัวเลขทศนิยมละติจูด (ถ้าไม่มีใส่ null),
+        "longitude": ตัวเลขทศนิยมลองจิจูด (ถ้าไม่มีใส่ null)
     }}
     """
     
     try:
-        # อัปเดตใช้โมเดล 3.6 ตามที่ API ของ Google บังคับ
         model = genai.GenerativeModel('gemini-3.6-flash')
         response = model.generate_content(prompt)
         
@@ -71,6 +72,8 @@ def handle_message(event):
         
         price = data.get('price')
         size = data.get('size_sq_wah')
+        lat = data.get('latitude')
+        lng = data.get('longitude')
         
         price_per_sq_wah = None
         if price and size and float(size) > 0:
@@ -83,18 +86,22 @@ def handle_message(event):
             "size_sq_wah": size,
             "price_per_sq_wah": price_per_sq_wah,
             "source_url": data.get('source_url'),
+            "latitude": lat,
+            "longitude": lng,
             "status": "ใหม่"
         }
         
         supabase.table("pakchong_market_scout").insert(insert_data).execute()
         
+        lat_lng_text = f"{lat}, {lng}" if lat and lng else "ไม่ได้ระบุพิกัด"
+        
         reply_msg = (
-            f"✅ บันทึกลงตาราง pakchong_market_scout สำเร็จ!\n\n"
+            f"✅ บันทึกข้อมูลสำเร็จ!\n\n"
             f"📌 ประเภท: {insert_data['property_type']}\n"
             f"📍 ทำเล: ต.{insert_data['location_zone']}\n"
             f"💰 ราคา: {f'{price:,.0f}' if price else 'ไม่ระบุ'} บาท\n"
             f"📐 ขนาด: {size if size else 'ไม่ระบุ'} ตร.ว.\n"
-            f"📊 ราคา/ตร.ว.: {f'{price_per_sq_wah:,.0f}' if price_per_sq_wah else 'ไม่ระบุ'} บาท"
+            f"🗺️ พิกัด: {lat_lng_text}"
         )
                     
     except Exception as e:
