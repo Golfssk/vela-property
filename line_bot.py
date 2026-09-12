@@ -58,7 +58,7 @@ def handle_message(event):
     """
     
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt)
         
         # ทำความสะอาดข้อมูล AI ที่อาจติด Markdown (```json ... ```)
