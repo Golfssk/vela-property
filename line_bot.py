@@ -58,7 +58,7 @@ def handle_message(event):
     
     try:
         # ใช้ชื่อโมเดลมาตรฐาน หากอัปเดตไลบรารีแล้วจะไม่ติด Error 404
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-3.6-flash')
         response = model.generate_content(prompt)
         
         raw_text = response.text.strip()
