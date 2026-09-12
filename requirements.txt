@@ -7,3 +7,5 @@ line-bot-sdk
 flask
 google-generativeai
 gunicorn
+reportlab
+requests

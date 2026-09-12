@@ -1,5 +1,7 @@
 import os
 import json
+import requests
+import uuid
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -9,6 +11,9 @@ from linebot.models import (
 )
 from supabase import create_client, Client
 import google.generativeai as genai
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 app = Flask(__name__)
 
@@ -26,8 +31,44 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# ตัวแปรจำสถานะการทำงานของ User แต่ละคน (ทำให้ไม่ต้องพิมพ์คำนำหน้าซ้ำ)
 USER_STATES = {}
+
+# ---------------- ฟังก์ชันสร้าง PDF สัญญา ----------------
+def create_contract_pdf(contract_data):
+    # 1. โหลดฟอนต์ภาษาไทย (ดาวน์โหลดมาเก็บไว้ชั่วคราว)
+    font_path = "/tmp/THSarabunNew.ttf"
+    if not os.path.exists(font_path):
+        font_url = "https://github.com/winitk/thaifonts/raw/master/THSarabunNew.ttf"
+        r = requests.get(font_url, allow_redirects=True)
+        open(font_path, 'wb').write(r.content)
+    
+    pdfmetrics.registerFont(TTFont('THSarabun', font_path))
+    
+    # 2. ตั้งชื่อไฟล์และที่เก็บชั่วคราว
+    file_name = f"contract_{uuid.uuid4().hex[:8]}.pdf"
+    file_path = f"/tmp/{file_name}"
+    
+    # 3. วาดข้อความลง PDF
+    c = canvas.Canvas(file_path)
+    c.setFont("THSarabun", 24)
+    c.drawString(200, 800, f"บันทึกข้อตกลง / สัญญา")
+    
+    c.setFont("THSarabun", 16)
+    y_position = 750
+    for key, value in contract_data.items():
+        c.drawString(50, y_position, f"{key}: {value}")
+        y_position -= 30
+        
+    c.save()
+    
+    # 4. อัปโหลดขึ้น Supabase Storage (ถังชื่อ 'contracts')
+    with open(file_path, "rb") as f:
+        supabase.storage.from_("contracts").upload(file_name, f, {"content-type": "application/pdf"})
+    
+    # 5. ดึง Public URL ส่งกลับไป
+    public_url = supabase.storage.from_("contracts").get_public_url(file_name)
+    return public_url
+
 
 @app.route("/")
 def home():
@@ -57,7 +98,6 @@ def handle_message(event):
     user_id = event.source.user_id
     model = genai.GenerativeModel('gemini-3.6-flash')
     
-    # เช็กว่า User คนนี้ค้างสถานะอะไรอยู่ไหม
     current_state = USER_STATES.get(user_id)
 
     # ---------------- ดักจับคำสั่งจากปุ่ม Rich Menu ----------------
@@ -91,12 +131,11 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🔄 ยกเลิกรายการเรียบร้อย กลับสู่โหมดปกติครับ"))
         return
 
-    # ---------------- โมดูล 1: บันทึกตลาด (ทำงานเมื่ออยู่ใน State หรือพิมพ์คำนำหน้า) ----------------
+    # ---------------- โมดูล 1: บันทึกตลาด ----------------
     if current_state == "MARKET_SCOUT" or user_text.startswith("บันทึกตลาด"):
-        if user_id in USER_STATES: del USER_STATES[user_id] # เคลียร์สถานะ
+        if user_id in USER_STATES: del USER_STATES[user_id] 
         clean_text = user_text.replace("บันทึกตลาด", "").strip()
         
-        # บังคับให้ AI ต้องเดาพิกัดจากสถานที่
         prompt = f"""
         สกัดข้อมูลอสังหาริมทรัพย์พื้นที่ปากช่องจากข้อความนี้ ให้อยู่ในรูปแบบ JSON เท่านั้น:
         "{clean_text}"
@@ -151,21 +190,11 @@ def handle_message(event):
         for w in ["เพิ่มลูกค้า", "เพิ่มผู้ขาย", "เพิ่มนายหน้า"]: clean_text = clean_text.replace(w, "").strip()
         
         contact_type = "ผู้ซื้อ" if "ผู้ซื้อ" in user_text or "ลูกค้า" in user_text else "ผู้ขาย" if "ผู้ขาย" in user_text else "นายหน้า"
-        if current_state == "CRM" and contact_type not in ["ผู้ขาย", "นายหน้า"]: contact_type = "ผู้ซื้อ" # Default
+        if current_state == "CRM" and contact_type not in ["ผู้ขาย", "นายหน้า"]: contact_type = "ผู้ซื้อ" 
         
         prompt = f"""
-        สกัดข้อมูล Lead จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น:
-        "{clean_text}"
-        
-        รูปแบบ:
-        {{
-            "name": "ชื่อบุคคล",
-            "budget_max": ตัวเลขงบสูงสุดเป็นบาท (ถ้าไม่มีระบุให้เดาจากงบประเมิน หรือใส่ 0),
-            "property_type": "ประเภททรัพย์ที่หา เช่น ที่ดิน, บ้าน (ถ้าไม่มีใส่ 'ไม่ระบุ')",
-            "location_zone": "ทำเลที่หา ถ้าไม่มีใส่ 'ไม่ระบุ'",
-            "contact_info": "เบอร์โทร หรือ Line",
-            "note": "รายละเอียดเพิ่มเติม"
-        }}
+        สกัดข้อมูล Lead จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น: "{clean_text}"
+        รูปแบบ: {{"name": "ชื่อ", "budget_max": ตัวเลขงบสูงสุดเป็นบาท, "property_type": "ประเภท", "location_zone": "ทำเล", "contact_info": "เบอร์/Line", "note": "รายละเอียด"}}
         """
         try:
             response = model.generate_content(prompt)
@@ -204,11 +233,7 @@ def handle_message(event):
         prompt = f"""
         คุณคือนักการตลาดอสังหาริมทรัพย์มืออาชีพ จงเขียนแคปชัน Facebook/TikTok สำหรับขายทรัพย์นี้:
         ข้อมูล: "{clean_text}"
-        
-        กรุณาเขียนผลลัพธ์โดยแบ่งเป็น 3 ส่วน:
-        1. 🎯 Headline: พาดหัวดึงดูดใจ 2 แบบ
-        2. 📝 Caption: เนื้อหาที่อ่านง่าย แบ่งวรรคตอนชัดเจน เน้นจุดเด่น (ใช้ Emoji ประกอบพองาม)
-        3. 🏷️ Hashtags: แฮชแท็กที่เกี่ยวข้องกับอสังหาฯ ปากช่อง/เขาใหญ่
+        แบ่งเป็น 3 ส่วน: 1. Headline ดึงดูดใจ, 2. Caption เน้นจุดเด่น (ใช้อีโมจิ), 3. Hashtags
         """
         try:
             response = model.generate_content(prompt)
@@ -216,7 +241,7 @@ def handle_message(event):
         except Exception as e:
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Content: {str(e)}"))
 
-    # ---------------- โมดูล 4: เมนูกฎหมายและสัญญา ----------------
+    # ---------------- โมดูล 4: เมนูกฎหมายและสัญญา (PDF) ----------------
     elif user_text == "[MENU] สัญญา":
         quick_reply_buttons = QuickReply(items=[
             QuickReplyButton(action=MessageAction(label="🆕 สร้างสัญญา", text="[CONTRACT] สร้าง")),
@@ -248,24 +273,64 @@ def handle_message(event):
         USER_STATES[user_id] = "CONTRACT_EDIT"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✏️ **โหมดแก้ไขสัญญา**\n\nวางจุดที่ต้องการปรับแก้ได้เลยครับ"))
 
+    # ระบบออกไฟล์ PDF
     elif current_state and current_state.startswith("PDF_"):
+        contract_type = current_state.replace("PDF_", "")
         if user_id in USER_STATES: del USER_STATES[user_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ ได้รับข้อมูลแล้ว ระบบ AI PDF กำลังอยู่ระหว่างเชื่อมต่อครับ..."))
         
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ กำลังประมวลผลข้อมูลและสร้างไฟล์ PDF {contract_type} กรุณารอสักครู่..."))
+        
+        prompt = f"""
+        สกัดข้อมูลเพื่อทำสัญญาจากข้อความนี้ ให้อยู่ในรูปแบบ JSON เท่านั้น:
+        "{user_text}"
+        
+        รูปแบบ:
+        {{
+            "ประเภทสัญญา": "{contract_type}",
+            "ผู้ขาย/ผู้ให้สัญญา": "ชื่อ (ถ้ามี)",
+            "ผู้ซื้อ/ผู้รับสัญญา": "ชื่อ (ถ้ามี)",
+            "ทรัพย์สิน": "รายละเอียด",
+            "ราคา/เงื่อนไข": "รายละเอียด",
+            "วันที่": "ระบุหรือเว้นว่าง"
+        }}
+        """
+        try:
+            response = model.generate_content(prompt)
+            contract_data = parse_gemini_json(response.text)
+            
+            # เรียกฟังก์ชันสร้าง PDF และอัปโหลด
+            pdf_url = create_contract_pdf(contract_data)
+            
+            reply_msg = f"✅ **สร้างสัญญาสำเร็จ!**\n\nสามารถกดดาวน์โหลดไฟล์ PDF เพื่อนำไปตรวจสอบหรือพิมพ์ได้ที่ลิงก์ด้านล่างนี้ครับ:\n\n🔗 {pdf_url}"
+            line_bot_api.push_message(event.source.user_id, TextSendMessage(text=reply_msg))
+            
+        except Exception as e:
+            line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ เกิดข้อผิดพลาดในการสร้าง PDF: {str(e)}"))
+
     elif current_state in ("CONTRACT_CHECK", "CONTRACT_EDIT"):
         if user_id in USER_STATES: del USER_STATES[user_id]
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ กำลังตรวจสอบและประมวลผลทางกฎหมาย..."))
 
-    # ---------------- โมดูล 5: คำนวณค่าโอน ----------------
+    # ---------------- โมดูล 5: คำนวณค่าโอน (ปรับเป็นแบบบิลใบเสร็จ) ----------------
     elif current_state == "TAX" or user_text.startswith("ค่าโอน"):
         if user_id in USER_STATES: del USER_STATES[user_id]
         clean_text = user_text.replace("ค่าโอน", "").strip()
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ AI กำลังคำนวณภาษีและค่าธรรมเนียม กรุณารอสักครู่..."))
         prompt = f"""
-        คุณคือเจ้าหน้าที่ประเมินอสังหาริมทรัพย์
-        จงคำนวณค่าใช้จ่ายวันโอนกรรมสิทธิ์จากข้อมูลนี้: "{clean_text}"
-        เงื่อนไข: ค่าโอน 2%, ภาษีธุรกิจเฉพาะ 3.3% หรือ อากรแสตมป์ 0.5%, ภาษีเงินได้หัก ณ ที่จ่าย
-        สรุปเป็น Bullet Point อ่านง่าย
+        คุณคือเจ้าหน้าที่ประเมินอสังหาฯ จงคำนวณค่าใช้จ่ายวันโอนจากข้อมูล: "{clean_text}"
+        
+        กฎ: ห้ามอธิบายยืดเยื้อ ให้ออกแบบข้อความเหมือน 'บิลใบเสร็จ' ที่อ่านง่ายบนจอมือถือที่สุด ใช้ Emoji ช่วย
+        สมมติฐานหากไม่ระบุ: บุคคลธรรมดา, ถือครอง 3 ปี
+        
+        รูปแบบที่ต้องการ:
+        🧾 สรุปค่าโอนกรรมสิทธิ์
+        📍 ราคาขาย: ... บ. | ประเมิน: ... บ.
+        
+        1. ค่าธรรมเนียมโอน (2%): ... บ.
+        2. ภาษีธุรกิจเฉพาะ (3.3%) / อากร (0.5%): ... บ. (เลือกอันที่เข้าเงื่อนไข)
+        3. ภาษีเงินได้ (หัก ณ ที่จ่าย): ... บ. (ประมาณการ)
+        
+        💰 รวมต้องเตรียมเงินสดประมาณ: ... บาท
         """
         try:
             response = model.generate_content(prompt)
@@ -298,7 +363,7 @@ def handle_message(event):
             
             if comparables:
                 avg_price = sum([c['price_per_sq_wah'] for c in comparables]) / len(comparables)
-                analysis = model.generate_content(f"สรุปความคุ้มค่า: {target_type} ต.{target_zone} ราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว. เทียบกับตลาดเฉลี่ย {avg_price:,.0f} บ./ตร.ว. เป็น Good Deal ไหม?").text.strip()
+                analysis = model.generate_content(f"สรุปความคุ้มค่า: {target_type} ต.{target_zone} ราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว. เทียบกับตลาดเฉลี่ย {avg_price:,.0f} บ./ตร.ว. เป็น Good Deal ไหม? สรุปสั้นๆ").text.strip()
                 reply_msg = f"📊 **ผลประเมินราคา:** {target_type} ต.{target_zone}\n🔎 เทียบกับฐานข้อมูล {len(comparables)} แปลงในพื้นที่\n\n{analysis}"
             else:
                 reply_msg = f"📉 **ผลประเมินราคา:** {target_type} ต.{target_zone}\nราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว.\n⚠️ ยังไม่มีข้อมูลเปรียบเทียบในระบบครับ"
