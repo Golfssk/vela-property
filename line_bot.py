@@ -57,7 +57,7 @@ def handle_message(event):
     """
     
     try:
-        # ใช้ชื่อโมเดลมาตรฐาน หากอัปเดตไลบรารีแล้วจะไม่ติด Error 404
+        # อัปเดตใช้โมเดล 3.6 ตามที่ API ของ Google บังคับ
         model = genai.GenerativeModel('gemini-3.6-flash')
         response = model.generate_content(prompt)
         
@@ -86,7 +86,6 @@ def handle_message(event):
             "status": "ใหม่"
         }
         
-        # ชี้เป้าไปที่ตารางใหม่
         supabase.table("pakchong_market_scout").insert(insert_data).execute()
         
         reply_msg = (
