@@ -20,14 +20,6 @@ st.set_page_config(
 SUPABASE_URL = "https://vfieyjxlrpziiksyccdt.supabase.co"
 SUPABASE_KEY = "sb_publishable_udkJwGJ8zjXlEOlYszDRUg_yVD4g7ie"
 
-ZONE_COLORS = {
-    "เขาใหญ่": "#b8873b",
-    "วังน้ำเขียว": "#5c7a5e",
-    "กลางดง": "#8b5e3c",
-    "มวกเหล็ก": "#3f6b7a",
-}
-DEFAULT_ZONE_COLOR = "#6b6250"
-
 ZONES = [
     {"name": "เขาใหญ่", "tag": "โซนธรรมชาติ",
      "desc": "ติดอุทยานแห่งชาติ อากาศเย็นตลอดปี กลุ่มบ้านพักตากอากาศและรีสอร์ตระดับพรีเมียม"},
@@ -44,106 +36,132 @@ ZONES = [
 # =========================================================
 st.markdown("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Taviraj:wght@300;400;500;600&family=Sarabun:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --forest-950:#101f19;
-  --forest-900:#152a21;
-  --forest-800:#1f3a2e;
-  --stone-100:#f2ede0;
-  --stone-200:#e6ddc6;
-  --stone-300:#d6c9a6;
-  --brass:#b8873b;
-  --brass-light:#d7ab68;
-  --clay:#8b5e3c;
-  --ink:#1a1712;
+  --primary:#0066cc;
+  --primary-focus:#0071e3;
+  --primary-on-dark:#2997ff;
+  --ink:#1d1d1f;
+  --ink-muted-80:#333333;
+  --ink-muted-48:#7a7a7a;
+  --divider-soft:#f0f0f0;
+  --hairline:#e0e0e0;
+  --canvas:#ffffff;
+  --canvas-parchment:#f5f5f7;
+  --surface-pearl:#fafafc;
+  --surface-black:#000000;
+  --on-primary:#ffffff;
+  --on-dark:#ffffff;
 }
 #MainMenu, footer {visibility:hidden;}
 .stApp{
-  background:var(--stone-100);
+  background:var(--canvas);
 }
 .stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li{
-  font-family:'Sarabun', sans-serif;
+  font-family:'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   color:var(--ink);
+  font-size:17px;
+  line-height:1.47;
+  letter-spacing:-0.374px;
 }
 .stApp h1, .stApp h2, .stApp h3{
-  font-family:'Taviraj', serif;
-  color:var(--forest-950);
+  font-family:'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-weight:600;
+  letter-spacing:-0.374px;
+  color:var(--ink);
 }
 section[data-testid="stSidebar"]{
-  background:var(--forest-950);
+  background:var(--surface-black);
 }
 section[data-testid="stSidebar"] *{
-  color:var(--stone-200) !important;
+  color:var(--on-dark) !important;
 }
 section[data-testid="stSidebar"] .stRadio label{
-  font-size:1.02rem;
+  font-size:0.95rem;
+}
+section[data-testid="stSidebar"] input[type="radio"]{
+  accent-color:var(--primary);
 }
 .stButton>button, .stFormSubmitButton>button{
-  background:var(--brass);
-  color:var(--forest-950);
+  background:var(--primary);
+  color:var(--on-primary);
   border:none;
-  border-radius:2px;
-  font-weight:500;
-  padding:0.55rem 1.4rem;
+  border-radius:9999px;
+  font-weight:400;
+  font-size:17px;
+  padding:11px 22px;
+  transition:transform 0.1s ease, background 0.15s ease;
 }
 .stButton>button:hover, .stFormSubmitButton>button:hover{
-  background:var(--brass-light);
-  color:var(--forest-950);
+  background:var(--primary-focus);
+  color:var(--on-primary);
+}
+.stButton>button:active, .stFormSubmitButton>button:active{
+  transform:scale(0.95);
 }
 div[data-testid="stMetric"]{
-  background:var(--forest-950);
-  border:1px solid rgba(242,237,224,0.14);
-  padding:18px 20px;
-  border-radius:2px;
+  background:var(--canvas);
+  border:1px solid var(--hairline);
+  padding:24px;
+  border-radius:18px;
 }
-div[data-testid="stMetric"] label, div[data-testid="stMetricValue"]{
-  color:var(--stone-100) !important;
+div[data-testid="stMetric"] label{
+  color:var(--ink-muted-48) !important;
+  font-size:14px !important;
+  font-weight:600 !important;
+  letter-spacing:-0.224px !important;
+}
+div[data-testid="stMetricValue"]{
+  color:var(--ink) !important;
+  font-weight:600 !important;
+  letter-spacing:-0.374px !important;
 }
 .hero-banner{
   position:relative;
-  min-height:340px;
-  border-radius:2px;
+  min-height:420px;
+  border-radius:0px;
   overflow:hidden;
   display:flex;
   align-items:flex-end;
-  padding:40px 44px;
-  margin-bottom:8px;
+  padding:64px 48px;
+  margin-bottom:0px;
   background:
-    linear-gradient(180deg, rgba(16,31,25,0.35) 0%, rgba(16,31,25,0.55) 55%, rgba(16,31,25,0.95) 100%),
+    linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.35) 55%, rgba(0,0,0,0.78) 100%),
     url('https://images.unsplash.com/photo-1470770903676-69b98201ea1c?q=80&w=1800&auto=format&fit=crop') center/cover no-repeat;
 }
-.hero-eyebrow{color:var(--brass-light); font-family:'Taviraj',serif; font-style:italic; margin-bottom:10px;}
-.hero-title{color:var(--stone-100); font-family:'Taviraj',serif; font-size:2.6rem; line-height:1.15; margin:0;}
-.hero-sub{color:var(--stone-200); max-width:560px; margin-top:14px; font-size:1.02rem;}
+.hero-eyebrow{color:var(--primary-on-dark); font-weight:600; font-size:14px; letter-spacing:-0.224px; margin-bottom:12px;}
+.hero-title{color:var(--on-dark); font-weight:600; font-size:2.6rem; line-height:1.1; letter-spacing:-0.028em; margin:0;}
+.hero-sub{color:#cccccc; max-width:560px; margin-top:16px; font-size:1.15rem; font-weight:400; line-height:1.4;}
 .section-title{
-  font-family:'Taviraj', serif; font-size:1.5rem; color:var(--forest-950);
-  margin:26px 0 14px 0; border-bottom:1px solid var(--stone-300); padding-bottom:10px;
+  font-weight:600; font-size:1.7rem; color:var(--ink); letter-spacing:-0.374px;
+  margin:40px 0 20px 0; padding-bottom:0;
 }
 .zone-card{
-  background:#fff; border:1px solid var(--stone-300); padding:22px; border-radius:2px; height:100%;
+  background:var(--canvas); border:1px solid var(--hairline); padding:24px; border-radius:18px; height:100%;
 }
-.zone-card .tag{color:var(--clay); font-family:'Taviraj',serif; font-style:italic; font-size:0.85rem; margin-bottom:8px;}
-.zone-card h4{font-family:'Taviraj',serif; margin:0 0 8px 0; color:var(--forest-900); font-size:1.2rem;}
-.zone-card p{font-size:0.9rem; color:#5b5340; margin:0;}
+.zone-card .tag{color:var(--ink-muted-48); font-weight:600; font-size:0.82rem; margin-bottom:10px; letter-spacing:-0.224px;}
+.zone-card h4{font-weight:600; margin:0 0 8px 0; color:var(--ink); font-size:1.15rem; letter-spacing:-0.374px;}
+.zone-card p{font-size:0.92rem; color:var(--ink-muted-80); margin:0; line-height:1.5;}
 .listing-card{
-  background:var(--forest-950); border:1px solid rgba(242,237,224,0.12); border-radius:2px;
-  padding:20px; margin-bottom:14px;
+  background:var(--canvas); border:1px solid var(--hairline); border-radius:18px;
+  padding:22px; margin-bottom:14px;
 }
 .listing-card .zone-badge{
-  display:inline-block; font-size:0.72rem; padding:3px 10px; border-radius:20px; color:#101f19;
-  font-weight:600; margin-bottom:10px;
+  display:inline-block; font-size:0.75rem; padding:4px 12px; border-radius:9999px;
+  background:var(--surface-pearl); color:var(--ink-muted-80); font-weight:600;
+  margin-bottom:12px; border:1px solid var(--hairline);
 }
-.listing-card h4{color:var(--stone-100); font-family:'Sarabun',sans-serif; font-weight:600; margin:0 0 6px 0; font-size:1.05rem;}
-.listing-card .price{color:var(--brass-light); font-family:'Taviraj',serif; font-size:1.3rem; margin:6px 0;}
-.listing-card .meta{color:var(--stone-300); font-size:0.85rem;}
+.listing-card h4{color:var(--ink); font-weight:600; margin:0 0 6px 0; font-size:1.05rem; letter-spacing:-0.374px;}
+.listing-card .price{color:var(--ink); font-weight:600; font-size:1.3rem; margin:6px 0; letter-spacing:-0.374px;}
+.listing-card .meta{color:var(--ink-muted-48); font-size:0.85rem;}
 .lead-card{
-  background:#fff; border-left:4px solid var(--brass); padding:16px 20px; margin-bottom:10px; border-radius:2px;
+  background:var(--canvas); border:1px solid var(--hairline); padding:18px 22px; margin-bottom:12px; border-radius:18px;
 }
-.lead-card h5{margin:0 0 4px 0; font-family:'Sarabun',sans-serif; font-weight:600; color:var(--forest-900);}
-.lead-card .lead-meta{font-size:0.85rem; color:#6b6250;}
+.lead-card h5{margin:0 0 6px 0; font-weight:600; color:var(--ink); font-size:1rem; letter-spacing:-0.374px;}
+.lead-card .lead-meta{font-size:0.85rem; color:var(--ink-muted-48);}
 .empty-box{
-  border:1px dashed var(--stone-300); padding:28px; text-align:center; color:#6b6250; border-radius:2px;
+  border:1px dashed var(--hairline); padding:32px; text-align:center; color:var(--ink-muted-48); border-radius:18px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -173,10 +191,6 @@ def load_crm():
 def refresh_data():
     load_market_scout.clear()
     load_crm.clear()
-
-
-def zone_color(zone):
-    return ZONE_COLORS.get(zone, DEFAULT_ZONE_COLOR)
 
 
 def fmt_baht(v):
@@ -260,10 +274,9 @@ if page == "🏠 ภาพรวม":
         cols = st.columns(3)
         for col, (_, row) in zip(cols, latest.iterrows()):
             with col:
-                badge_color = zone_color(row.get("location_zone"))
                 st.markdown(f"""
                 <div class="listing-card">
-                  <span class="zone-badge" style="background:{badge_color};">{row.get('location_zone','ไม่ระบุ')}</span>
+                  <span class="zone-badge">{row.get('location_zone','ไม่ระบุ')}</span>
                   <h4>{row.get('property_type','ไม่ระบุประเภท')}</h4>
                   <div class="price">{fmt_baht(row.get('price'))}</div>
                   <div class="meta">{row.get('size_sq_wah','-')} ตร.วา · {fmt_baht(row.get('price_per_sq_wah')) if row.get('price_per_sq_wah') else 'ไม่ระบุราคา/ตรว.'}</div>
@@ -320,17 +333,16 @@ elif page == "📍 Market Scout":
                         location=[lat, lng],
                         popup=popup,
                         tooltip=fmt_baht(row.get("price")),
-                        icon=folium.Icon(color="green", icon="home"),
+                        icon=folium.Icon(color="blue", icon="home"),
                     ).add_to(cluster)
             st_folium(m, width=None, height=520)
 
         with list_col:
             st.markdown("**รายการประกาศ**")
             for _, row in filtered.iterrows():
-                badge_color = zone_color(row.get("location_zone"))
                 st.markdown(f"""
                 <div class="listing-card">
-                  <span class="zone-badge" style="background:{badge_color};">{row.get('location_zone','ไม่ระบุ')}</span>
+                  <span class="zone-badge">{row.get('location_zone','ไม่ระบุ')}</span>
                   <h4>{row.get('property_type','ไม่ระบุประเภท')}</h4>
                   <div class="price">{fmt_baht(row.get('price'))}</div>
                   <div class="meta">{row.get('size_sq_wah','-')} ตร.วา
@@ -361,7 +373,7 @@ elif page == "📊 วิเคราะห์ตลาด":
             st.markdown("**ราคาเฉลี่ยต่อตารางวา แยกตามโซน**")
             zone_avg = df_market.dropna(subset=["price_per_sq_wah", "location_zone"]).groupby("location_zone", as_index=False)["price_per_sq_wah"].mean()
             if not zone_avg.empty:
-                chart = alt.Chart(zone_avg).mark_bar(color="#b8873b").encode(
+                chart = alt.Chart(zone_avg).mark_bar(color="#0066cc").encode(
                     x=alt.X("location_zone:N", title="โซน"),
                     y=alt.Y("price_per_sq_wah:Q", title="บาท/ตร.วา"),
                     tooltip=["location_zone", "price_per_sq_wah"],
@@ -375,7 +387,7 @@ elif page == "📊 วิเคราะห์ตลาด":
             type_count = df_market["property_type"].value_counts().reset_index()
             type_count.columns = ["property_type", "count"]
             if not type_count.empty:
-                chart2 = alt.Chart(type_count).mark_bar(color="#1f3a2e").encode(
+                chart2 = alt.Chart(type_count).mark_bar(color="#1d1d1f").encode(
                     x=alt.X("property_type:N", title="ประเภททรัพย์"),
                     y=alt.Y("count:Q", title="จำนวน"),
                     tooltip=["property_type", "count"],
@@ -385,7 +397,7 @@ elif page == "📊 วิเคราะห์ตลาด":
         st.markdown("**การกระจายตัวของราคา**")
         price_data = df_market.dropna(subset=["price"])
         if not price_data.empty:
-            hist = alt.Chart(price_data).mark_bar(color="#8b5e3c").encode(
+            hist = alt.Chart(price_data).mark_bar(color="#7a7a7a").encode(
                 x=alt.X("price:Q", bin=alt.Bin(maxbins=25), title="ราคา (บาท)"),
                 y=alt.Y("count()", title="จำนวนประกาศ"),
             )
@@ -397,7 +409,7 @@ elif page == "📊 วิเคราะห์ตลาด":
             ts["date"] = pd.to_datetime(ts["created_at"]).dt.date
             trend = ts.groupby("date").size().reset_index(name="count")
             if not trend.empty:
-                line = alt.Chart(trend).mark_line(color="#b8873b", point=True).encode(
+                line = alt.Chart(trend).mark_line(color="#0066cc", point=True).encode(
                     x="date:T", y="count:Q", tooltip=["date", "count"]
                 )
                 st.altair_chart(line, use_container_width=True)
