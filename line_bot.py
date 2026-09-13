@@ -373,7 +373,7 @@ def create_contract_pdf(contract_type: str, full_text: str) -> str:
     """สร้าง PDF A4 จากข้อความสัญญาเต็ม แล้วอัปโหลด Supabase Storage คืน signed URL"""
     ensure_thai_font()
 
-    file_name = f"{contract_type.replace(' ', '_')}_{uuid.uuid4().hex[:8]}.pdf"
+    file_name = f"contract_{uuid.uuid4().hex[:8]}.pdf"
     file_path = f"/tmp/{file_name}"
 
     doc = SimpleDocTemplate(
