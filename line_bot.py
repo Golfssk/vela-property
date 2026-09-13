@@ -74,7 +74,7 @@ if GEMINI_API_KEY:
 
 FONT_URL = os.getenv(
     "THAI_FONT_URL",
-    "https://github.com/winitk/thaifonts/raw/master/THSarabunNew.ttf",
+    "https://github.com/google/fonts/raw/main/ofl/sarabun/Sarabun-Regular.ttf",
 )
 FONT_PATH = "/tmp/THSarabunNew.ttf"
 _FONT_READY = False
