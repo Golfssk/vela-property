@@ -338,15 +338,22 @@ def handle_message(event):
         except Exception as e:
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Tax: {str(e)}"))
 
-    # ---------------- โมดูล 6: ประเมินราคา ----------------
+    # ---------------- โมดูล 6: ประเมินราคา (อัปเกรดเทียบราคาตลาด + ประเมินราชการ) ----------------
     elif current_state == "VALUATION" or user_text.startswith("ประเมิน"):
         if user_id in USER_STATES: del USER_STATES[user_id]
         clean_text = user_text.replace("ประเมิน", "").strip()
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ AI กำลังสืบค้นราคาตลาดและวิเคราะห์ความคุ้มค่า..."))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ AI กำลังวิเคราะห์ราคาตลาดและประเมินส่วนต่าง (Markup) กรุณารอสักครู่..."))
         
         prompt_extract = f"""
         สกัดข้อมูลเพื่อประเมินราคา จากข้อความนี้ให้อยู่ในรูปแบบ JSON เท่านั้น: "{clean_text}"
-        รูปแบบ: {{"property_type": "ประเภท", "location_zone": "ทำเล", "price": 0, "size_sq_wah": 0}}
+        รูปแบบ: {{
+            "property_type": "ประเภท (เช่น ที่ดิน, บ้าน)", 
+            "location_zone": "ทำเล (ตำบล)", 
+            "price": 0, 
+            "size_sq_wah": 0,
+            "gov_price": 0
+        }}
+        (หมายเหตุ: ถ้าผู้ใช้ไม่ได้ระบุราคาประเมินราชการ ให้ใส่ gov_price เป็น 0)
         """
         try:
             ext_response = model.generate_content(prompt_extract)
@@ -356,22 +363,39 @@ def handle_message(event):
             target_zone = data.get('location_zone', 'ไม่ระบุ')
             target_price = data.get('price', 0)
             target_size = data.get('size_sq_wah', 0)
+            gov_price = data.get('gov_price', 0)
+            
             target_price_per_sqw = target_price / target_size if target_size and target_size > 0 else 0
             
+            # 1. เช็กข้อมูลเปรียบเทียบใน Database (ถ้ามี)
             res = supabase.table("pakchong_market_scout").select("price, size_sq_wah, price_per_sq_wah").eq("property_type", target_type).ilike("location_zone", f"%{target_zone}%").execute()
             comparables = [c for c in res.data if c.get('price_per_sq_wah')]
+            db_count = len(comparables)
+            avg_price_db = sum([c['price_per_sq_wah'] for c in comparables]) / db_count if db_count > 0 else 0
             
-            if comparables:
-                avg_price = sum([c['price_per_sq_wah'] for c in comparables]) / len(comparables)
-                analysis = model.generate_content(f"สรุปความคุ้มค่า: {target_type} ต.{target_zone} ราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว. เทียบกับตลาดเฉลี่ย {avg_price:,.0f} บ./ตร.ว. เป็น Good Deal ไหม? สรุปสั้นๆ").text.strip()
-                reply_msg = f"📊 **ผลประเมินราคา:** {target_type} ต.{target_zone}\n🔎 เทียบกับฐานข้อมูล {len(comparables)} แปลงในพื้นที่\n\n{analysis}"
-            else:
-                reply_msg = f"📉 **ผลประเมินราคา:** {target_type} ต.{target_zone}\nราคาตก {target_price_per_sqw:,.0f} บ./ตร.ว.\n⚠️ ยังไม่มีข้อมูลเปรียบเทียบในระบบครับ"
-                
+            # 2. ให้ AI วิเคราะห์ข้ามมิติ (DB + ความรู้ทำเล + สัดส่วนราคาประเมิน)
+            analysis_prompt = f"""
+            คุณคือนักประเมินราคาอสังหาฯ ระดับมืออาชีพ พื้นที่ปากช่อง/เขาใหญ่
+            จงวิเคราะห์ความคุ้มค่าของทรัพย์นี้ โดยใช้ข้อมูลเบื้องต้นและความเชี่ยวชาญของคุณ:
+            
+            📍 ทรัพย์: {target_type} ต.{target_zone} ขนาด {target_size} ตร.ว.
+            💰 ราคาเสนอขาย: {target_price:,.0f} บาท (ตก {target_price_per_sqw:,.0f} บ./ตร.ว.)
+            🏛️ ราคาประเมินราชการ: {gov_price:,.0f} บาท
+            📊 ข้อมูลเปรียบเทียบในระบบ: {db_count} แปลง (ราคาเฉลี่ย {avg_price_db:,.0f} บ./ตร.ว.)
+            
+            วิเคราะห์ 3 ข้อต่อไปนี้ให้อ่านง่าย (เหมือนบิลใบเสร็จ สั้น กระชับ ใช้ Emoji):
+            1. ส่วนต่างราคา (Markup): เทียบราคาเสนอขายกับราคาประเมินราชการ (ถ้าระบุ) ว่าแพงกว่ากี่เท่า สมเหตุสมผลกับทำเลปากช่องหรือไม่ (ปกติบวก 1.5 - 3 เท่า)
+            2. แนวโน้มตลาด: ราคา {target_price_per_sqw:,.0f} บ./ตร.ว. ใน ต.{target_zone} ถือว่าถูก หรือ แพง กว่าราคาซื้อขายทั่วไปบนเว็บไซต์อสังหาฯ ในปัจจุบัน
+            3. สรุปความคุ้มค่า: เป็น Good Deal หรือไม่? ควรต่อรองราคาเหลือเท่าไรเพื่อปิดดีล?
+            """
+            
+            analysis = model.generate_content(analysis_prompt).text.strip()
+            reply_msg = f"📊 **รายงานประเมินราคา:** {target_type} ต.{target_zone}\n\n{analysis}"
+            
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=reply_msg))
+            
         except Exception as e:
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Valuation: {str(e)}"))
-
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="💡 กรุณากดเลือกเมนูจาก Rich Menu ด้านล่างได้เลยครับ"))
 
