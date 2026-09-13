@@ -309,7 +309,8 @@ def normalize_tambon(name: Optional[str]) -> Optional[str]:
 
 def safe_fill(template_str: str, data: dict) -> dict:
     """สร้าง dict ที่มีครบทุก placeholder ใน template ป้องกัน KeyError 100%"""
-    needed = re.findall(r"\{(\w+)\}", template_str)
+    # เปลี่ยนสูตรค้นหาเป็น [^}]+ เพื่อให้กวาดจับตัวแปรภาษาไทยได้แบบชัวร์ๆ
+    needed = re.findall(r"\{([^}]+)\}", template_str)
     blank = "....................................."
     out = {}
     for key in needed:
