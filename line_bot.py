@@ -474,6 +474,25 @@ MARKET_PROMPT = """คุณคือระบบสกัดข้อมูล�
 - ถ้าพบคำว่า รับฝากขาย, ค่าคอม, ทีมงาน ให้ seller_type เป็น "นายหน้า"
 """
 
+def search_location_coords(query_str: str) -> Optional[tuple]:
+    """ค้นหาพิกัด ละติจูด, ลองจิจูด จากชื่อสถานที่/โครงการ ผ่าน OpenStreetMap Geocoding"""
+    if not query_str:
+        return None
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        headers = {"User-Agent": "VelaPropertyAgentBot/1.0"}
+        params = {
+            "q": f"{query_str} ปากช่อง เขาใหญ่ นครราชสีมา",
+            "format": "json",
+            "limit": 1
+        }
+        res = requests.get(url, params=params, headers=headers, timeout=5)
+        data = res.json()
+        if data:
+            return float(data[0]["lat"]), float(data[0]["lon"])
+    except Exception as e:
+        log.warning("Geocoding error for '%s': %s", query_str, e)
+    return None
 
 def handle_market_scout(user_id: str, text: str, reply_token: str) -> None:
     clean = re.sub(r"^บันทึกตลาด", "", text).strip()
@@ -481,7 +500,7 @@ def handle_market_scout(user_id: str, text: str, reply_token: str) -> None:
         reply(reply_token, "⚠️ ข้อความสั้นเกินไปครับ กรุณาวางเนื้อหาโพสต์ขายให้ครบถ้วน")
         return
 
-    reply(reply_token, "⏳ กำลังแกะข้อมูลทรัพย์...")
+    reply(reply_token, "⏳ กำลังแกะข้อมูลทรัพย์และค้นหาพิกัดสถานที่...")
 
     try:
         data = ask_gemini_json(MARKET_PROMPT.format(
@@ -496,12 +515,28 @@ def handle_market_scout(user_id: str, text: str, reply_token: str) -> None:
     tambon = normalize_tambon(data.get("location_zone"))
     ppw = (price / size) if (price and size and size > 0) else None
 
-    # --- จัดการพิกัดแบบมีชั้นความเชื่อมั่น ---
+    # --- ระบบค้นหาพิกัดแบบอัจฉริยะ (Smart Location Discovery) ---
     coords = parse_maps_coords(clean)
+    project_or_landmark = data.get("project_name") or data.get("landmark")
+    
     if coords:
+        # ชั้นที่ 1: ดึงจากลิงก์ Google Maps โดยตรง
         lat, lng = coords
         loc_conf, loc_src = "exact", "google_maps_url"
+    elif project_or_landmark:
+        # ชั้นที่ 2: ให้ AI นำชื่อโครงการ/สถานที่ ไปค้นหาพิกัดจริงให้อัตโนมัติ
+        searched_coords = search_location_coords(project_or_landmark)
+        if searched_coords:
+            lat, lng = searched_coords
+            loc_conf, loc_src = "exact", f"auto_search_{project_or_landmark}"
+        elif tambon:
+            lat, lng = TAMBON_CENTROIDS[tambon]
+            loc_conf, loc_src = "estimated", "tambon_center"
+        else:
+            lat = lng = None
+            loc_conf, loc_src = "unknown", "none"
     elif tambon:
+        # ชั้นที่ 3: ใช้พิกัดกลางประจำตำบล
         lat, lng = TAMBON_CENTROIDS[tambon]
         loc_conf, loc_src = "estimated", "tambon_center"
     else:
@@ -538,10 +573,10 @@ def handle_market_scout(user_id: str, text: str, reply_token: str) -> None:
         return
 
     conf_label = {
-        "exact": "✅ พิกัดจริงจากลิงก์",
-        "estimated": "🟡 ประมาณจากตำบล (ยังไม่ใช่ตำแหน่งจริง)",
+        "exact": f"✅ ค้นหาพิกัดเจออัตโนมัติ ({loc_src})",
+        "estimated": "🟡 ประมาณจากพิกัดกลางตำบล",
         "unknown": "❌ ยังไม่มีพิกัด",
-    }[loc_conf]
+    }.get(loc_conf, "📍 ปักหมุดแล้ว")
 
     msg = (
         f"✅ บันทึกข้อมูลตลาดสำเร็จ\n"
@@ -553,10 +588,8 @@ def handle_market_scout(user_id: str, text: str, reply_token: str) -> None:
         f"📐 {fmt_money(size) if size else 'ไม่ระบุ'} ตร.ว.\n"
         f"📊 {fmt_money(ppw) if ppw else '-'} บาท/ตร.ว.\n"
         f"👤 {row['seller_type']}\n"
-        f"🗺️ {conf_label}\n"
+        f"🗺️ พิกัด: {lat:.5f}, {lng:.5f}\n" if lat else f"🗺️ {conf_label}\n"
     )
-    if loc_conf != "exact":
-        msg += "\n💡 ส่งตำแหน่ง (Location) หรือวางลิงก์ Google Maps เพื่อปักหมุดให้แม่นยำครับ"
 
     set_state(user_id, "AWAIT_PIN", {"record_id": rec_id} if rec_id else {})
     push(user_id, msg, qr(("📍 ปักหมุดเพิ่ม", "ปักหมุด"), ("➕ บันทึกรายการต่อไป", "บันทึกตลาด")))
