@@ -11,9 +11,13 @@ from linebot.models import (
 )
 from supabase import create_client, Client
 import google.generativeai as genai
-from reportlab.pdfgen import canvas
+
+# --- ไลบรารีสำหรับสร้างและจัดหน้า PDF ---
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.pagesizes import A4
 
 app = Flask(__name__)
 
@@ -241,7 +245,7 @@ def handle_message(event):
         except Exception as e:
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Content: {str(e)}"))
 
-    # ---------------- โมดูล 4: เมนูกฎหมายและสัญญา (PDF) ----------------
+# ---------------- โมดูล 4: เมนูกฎหมายและสัญญา (PDF) ----------------
     elif user_text == "[MENU] สัญญา":
         quick_reply_buttons = QuickReply(items=[
             QuickReplyButton(action=MessageAction(label="🆕 สร้างสัญญา", text="[CONTRACT] สร้าง")),
@@ -256,6 +260,7 @@ def handle_message(event):
             QuickReplyButton(action=MessageAction(label="นายหน้าเปิด (Open)", text="[CREATE_PDF] นายหน้าเปิด")),
             QuickReplyButton(action=MessageAction(label="นายหน้าปิด (Exclusive)", text="[CREATE_PDF] นายหน้าปิด")),
             QuickReplyButton(action=MessageAction(label="สัญญาจะซื้อจะขาย", text="[CREATE_PDF] สัญญาจะซื้อจะขาย")),
+            QuickReplyButton(action=MessageAction(label="ใบจอง", text="[CREATE_PDF] ใบจอง")),
             QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"))
         ])
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="📝 **เลือกประเภทสัญญาที่ต้องการสร้าง:**", quick_reply=quick_reply_types))
@@ -263,7 +268,7 @@ def handle_message(event):
     elif user_text.startswith("[CREATE_PDF]"):
         contract_type = user_text.replace("[CREATE_PDF]", "").strip()
         USER_STATES[user_id] = f"PDF_{contract_type}"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"📄 **พร้อมสร้าง: {contract_type}**\n\nวางข้อมูลดีล เช่น ผู้ซื้อ ผู้ขาย ราคา มัดจำ ได้เลยครับ"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"📄 **พร้อมสร้าง: {contract_type}**\n\nพิมพ์ข้อมูลดีลได้เลยครับ (ส่วนไหนไม่ระบุ AI จะเว้นช่องว่างให้เติมทีหลัง)"))
 
     elif user_text == "[CONTRACT] ตรวจสอบ":
         USER_STATES[user_id] = "CONTRACT_CHECK"
@@ -271,14 +276,18 @@ def handle_message(event):
 
     elif user_text == "[CONTRACT] แก้ไข":
         USER_STATES[user_id] = "CONTRACT_EDIT"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✏️ **โหมดแก้ไขสัญญา**\n\nวางจุดที่ต้องการปรับแก้ได้เลยครับ"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✏️ **โหมดแก้ไขสัญญา**\n\nวางจุดที่ต้องการปรับแก้หรือเกลาภาษาได้เลยครับ"))
 
-    # ระบบออกไฟล์ PDF
+    # ระบบออกไฟล์ PDF โดยอิงตาม CONTRACT_TEMPLATES
     elif current_state and current_state.startswith("PDF_"):
         contract_type = current_state.replace("PDF_", "")
         if user_id in USER_STATES: del USER_STATES[user_id]
         
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ กำลังประมวลผลข้อมูลและสร้างไฟล์ PDF {contract_type} กรุณารอสักครู่..."))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ ทนาย AI กำลังร่าง {contract_type} ให้ถูกต้องตามกฎหมาย และจัดหน้า PDF..."))
+        
+        # ดึงรายชื่อฟิลด์ที่ต้องการเพื่อสร้าง JSON Prompt ให้ตรงกับ Template
+        req_fields = REQUIRED_FIELDS.get(contract_type, [])
+        fields_format = ",\n            ".join([f'"{f}": "ข้อมูล (ถ้าไม่ระบุให้ใส่ \'.....................................\')"' for f in req_fields])
         
         prompt = f"""
         สกัดข้อมูลเพื่อทำสัญญาจากข้อความนี้ ให้อยู่ในรูปแบบ JSON เท่านั้น:
@@ -286,30 +295,63 @@ def handle_message(event):
         
         รูปแบบ:
         {{
-            "ประเภทสัญญา": "{contract_type}",
-            "ผู้ขาย/ผู้ให้สัญญา": "ชื่อ (ถ้ามี)",
-            "ผู้ซื้อ/ผู้รับสัญญา": "ชื่อ (ถ้ามี)",
-            "ทรัพย์สิน": "รายละเอียด",
-            "ราคา/เงื่อนไข": "รายละเอียด",
-            "วันที่": "ระบุหรือเว้นว่าง"
+            "contract_date": "วันที่ทำสัญญา (ถ้าไม่ระบุให้ใส่ '.....................................')",
+            {fields_format}
         }}
         """
         try:
             response = model.generate_content(prompt)
-            contract_data = parse_gemini_json(response.text)
+            extracted_data = parse_gemini_json(response.text)
             
-            # เรียกฟังก์ชันสร้าง PDF และอัปโหลด
-            pdf_url = create_contract_pdf(contract_data)
+            # นำข้อมูลที่สกัดได้ไปแทนที่ใน Template
+            template = CONTRACT_TEMPLATES.get(contract_type, "")
+            full_text = template.format(**extracted_data)
             
-            reply_msg = f"✅ **สร้างสัญญาสำเร็จ!**\n\nสามารถกดดาวน์โหลดไฟล์ PDF เพื่อนำไปตรวจสอบหรือพิมพ์ได้ที่ลิงก์ด้านล่างนี้ครับ:\n\n🔗 {pdf_url}"
+            # เรียกฟังก์ชันสร้าง PDF (ส่งชื่อสัญญา และข้อความเต็ม)
+            pdf_url = create_contract_pdf(contract_type, full_text)
+            
+            reply_msg = f"✅ **ร่างสัญญาพร้อมใช้งาน!**\n\nดาวน์โหลดไฟล์ PDF ขนาด A4 เพื่อพิมพ์ให้ลูกค้าเซ็นได้ทันที:\n🔗 {pdf_url}"
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=reply_msg))
             
         except Exception as e:
             line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ เกิดข้อผิดพลาดในการสร้าง PDF: {str(e)}"))
 
-    elif current_state in ("CONTRACT_CHECK", "CONTRACT_EDIT"):
+    # ระบบตรวจสอบสัญญา (สวมบททนาย)
+    elif current_state == "CONTRACT_CHECK" or user_text.startswith("ตรวจสัญญา"):
         if user_id in USER_STATES: del USER_STATES[user_id]
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ กำลังตรวจสอบและประมวลผลทางกฎหมาย..."))
+        clean_text = user_text.replace("ตรวจสัญญา", "").strip()
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ ทนาย AI กำลังสแกนหาช่องโหว่และเงื่อนไขที่เอาเปรียบ..."))
+        
+        prompt = f"""
+        คุณคือทนายความอสังหาริมทรัพย์ที่เชี่ยวชาญกฎหมายไทย ตรวจสอบข้อความนี้: "{clean_text}"
+        แสดงผลลัพธ์เป็น Bullet Points ที่อ่านง่ายบนมือถือ:
+        1. 🚨 จุดเสี่ยง/ข้อควรระวัง
+        2. ⚖️ ความเป็นธรรม (ฝั่งไหนได้เปรียบ/เสียเปรียบ)
+        3. 💡 ข้อแนะนำเพิ่มเติมเพื่อปิดช่องโหว่
+        """
+        try:
+            response = model.generate_content(prompt)
+            line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"🔍 **ผลการตรวจสอบสัญญา**\n\n{response.text.strip()}"))
+        except Exception as e:
+            line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Check: {str(e)}"))
+
+    # ระบบแก้ไขสัญญา (เกลาภาษา)
+    elif current_state == "CONTRACT_EDIT" or user_text.startswith("แก้ไขสัญญา"):
+        if user_id in USER_STATES: del USER_STATES[user_id]
+        clean_text = user_text.replace("แก้ไขสัญญา", "").strip()
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⏳ ทนาย AI กำลังเกลาภาษากฎหมายให้รัดกุม..."))
+        
+        prompt = f"""
+        คุณคือทนายความอสังหาริมทรัพย์มืออาชีพ แก้ไขเกลาข้อความนี้ให้รัดกุม เป็นทางการ: "{clean_text}"
+        แสดงผลลัพธ์:
+        ✨ **ข้อความที่แก้ไขแล้ว:** (พร้อมนำไปก๊อปปี้วาง)
+        📝 **สิ่งที่ปรับเปลี่ยน:** (อธิบายสั้นๆ ว่าปรับแก้จุดใดเพื่อให้รัดกุมขึ้น)
+        """
+        try:
+            response = model.generate_content(prompt)
+            line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"✏️ **ร่างข้อความใหม่**\n\n{response.text.strip()}"))
+        except Exception as e:
+            line_bot_api.push_message(event.source.user_id, TextSendMessage(text=f"❌ Error Edit: {str(e)}"))
 
     # ---------------- โมดูล 5: คำนวณค่าโอน (ปรับเป็นแบบบิลใบเสร็จ) ----------------
     elif current_state == "TAX" or user_text.startswith("ค่าโอน"):
